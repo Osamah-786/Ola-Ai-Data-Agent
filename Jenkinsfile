@@ -84,8 +84,8 @@ pipeline {
             steps {
                 sh '''
                     if command -v trivy >/dev/null 2>&1; then
-                        trivy image --exit-code 1 --severity HIGH,CRITICAL --ignore-unfixed "$BACKEND_IMAGE"
-                        trivy image --exit-code 1 --severity HIGH,CRITICAL --ignore-unfixed "$FRONTEND_IMAGE"
+                        trivy image --config="" --ignorefile="" --secret-config="" --exit-code 1 --severity HIGH,CRITICAL --ignore-unfixed "$BACKEND_IMAGE"
+                        trivy image --config="" --ignorefile="" --secret-config="" --exit-code 1 --severity HIGH,CRITICAL --ignore-unfixed "$FRONTEND_IMAGE"
                     else
                         echo 'Trivy image scanning skipped: trivy is unavailable on the Jenkins agent.'
                     fi
