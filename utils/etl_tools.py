@@ -1,23 +1,21 @@
 # ```python
 import os
-import io
-import contextlib
+from pathlib import Path
 import requests
 import pandas as pd
 
 from groq import Groq
 from dotenv import load_dotenv
+from utils.safe_http import UnsafeInputError, request_json, resolve_data_path
 
 
 class ETLTools:
     def __init__(self):
         # Load environment variables from the project root.
-        self.project_root = os.path.abspath(
-            os.path.join(os.path.dirname(__file__), "..")
-        )
+        self.project_root = Path(__file__).resolve().parent.parent
 
         load_dotenv(
-            os.path.join(self.project_root, ".env")
+            self.project_root / ".env"
         )
 
     def extract_load(
@@ -43,20 +41,13 @@ class ETLTools:
             if output_format not in {"csv", "json", "parquet"}:
                 return f"Unsupported format: {format}"
 
-            if os.path.isabs(output_folder):
-                folder_path = output_folder
-            else:
-                folder_path = os.path.join(
-                    self.project_root,
-                    output_folder
-                )
+            folder_path = resolve_data_path(self.project_root, output_folder)
 
             os.makedirs(folder_path, exist_ok=True)
 
             # Fetch API response.
-            response = requests.get(url, timeout=30)
-            response.raise_for_status()
-            data = response.json()
+            with requests.Session() as session:
+                data, _, _ = request_json(session, url)
 
             # Normalize common API response structures.
             if isinstance(data, dict) and "results" in data:
@@ -82,10 +73,10 @@ class ETLTools:
                     f"{type(data).__name__}"
                 )
 
-            filename = os.path.join(
-                folder_path,
-                f"extracted_data.{output_format}"
-            )
+            if len(df) > 100_000:
+                return "Extraction stopped: record limit of 100,000 exceeded."
+
+            filename = folder_path / f"extracted_data.{output_format}"
 
             # Save the extracted data.
             if output_format == "csv":
@@ -111,7 +102,7 @@ class ETLTools:
                 f"Total records: {len(df)}"
             )
 
-        except requests.exceptions.RequestException as e:
+        except (requests.exceptions.RequestException, UnsafeInputError) as e:
             return f"Failed to extract data: {e}"
 
         except ValueError as e:
@@ -132,18 +123,15 @@ class ETLTools:
         its metadata and first three rows as AI-agent context.
         """
         try:
-            if not os.path.isabs(file_path):
-                file_path = os.path.join(
-                    self.project_root,
-                    file_path
-                )
+            file_path = resolve_data_path(self.project_root, file_path)
 
-            if not os.path.isfile(file_path):
+            if not file_path.is_file():
                 return f"File not found: {file_path}"
 
-            file_extension = os.path.splitext(
-                file_path
-            )[1].lower()
+            if file_path.stat().st_size > 50 * 1024 * 1024:
+                return "Input file exceeds the 50 MiB limit."
+
+            file_extension = file_path.suffix.lower()
 
             if file_extension == ".csv":
                 df = pd.read_csv(file_path)
@@ -180,7 +168,7 @@ class ETLTools:
                 f"First 3 rows:\n{preview}"
             )
 
-        except (OSError, ValueError, ImportError) as e:
+        except (OSError, ValueError, ImportError, UnsafeInputError) as e:
             return f"Failed to read data: {e}"
 
         except Exception as e:
@@ -216,38 +204,6 @@ class ETLTools:
 
         except Exception as e:
             return f"Failed to list Groq models: {e}"
-
-    def execute_code(self, code: str) -> str:
-        """
-        Execute trusted Python code and capture printed output.
-
-        WARNING:
-        exec() can run arbitrary code. Do not pass untrusted
-        user input or LLM-generated code without a secure sandbox.
-        """
-        try:
-            output_buffer = io.StringIO()
-
-            with contextlib.redirect_stdout(output_buffer):
-                exec(
-                    code,
-                    {"__builtins__": __builtins__},
-                    {}
-                )
-
-            output = output_buffer.getvalue().strip()
-
-            if output:
-                return (
-                    "Code executed successfully.\n\n"
-                    f"Output:\n{output}"
-                )
-
-            return "Code executed successfully. No output produced."
-
-        except Exception as e:
-            return f"Failed to execute code: {e}"
-
 
 if __name__ == "__main__":
     tools = ETLTools()

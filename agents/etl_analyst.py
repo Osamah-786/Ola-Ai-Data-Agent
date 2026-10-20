@@ -3,6 +3,7 @@ import os
 import sys
 import json
 from pathlib import Path
+from urllib.parse import urljoin
 
 import pandas as pd
 import requests
@@ -26,6 +27,7 @@ load_dotenv(PROJECT_ROOT / ".env")
 
 from models.schema import ETLAgentSchema
 from app.services.etl_transform import TransformationPlanError, apply_plan, parse_plan
+from utils.safe_http import UnsafeInputError, request_json, resolve_data_path, validate_public_url
 
 
 # ============================================================
@@ -51,16 +53,12 @@ llm = ChatGroq(
 # ============================================================
 
 SUPPORTED_FORMATS = {"csv", "json", "parquet"}
+MAX_INPUT_FILE_BYTES = 50 * 1024 * 1024
 
 
 def resolve_path(path: str) -> Path:
-    """Resolve a relative path against the project root."""
-    candidate = Path(path)
-
-    if not candidate.is_absolute():
-        candidate = PROJECT_ROOT / candidate
-
-    return candidate.resolve()
+    """Resolve legacy ETL paths while confining access to project data."""
+    return resolve_data_path(PROJECT_ROOT, path)
 
 
 def save_dataframe(df: pd.DataFrame, file_path: Path) -> None:
@@ -144,10 +142,11 @@ def extract_load_tool(
         output_path.mkdir(parents=True, exist_ok=True)
 
         records = []
-        next_url = url
+        next_url = validate_public_url(url)
         visited_urls = set()
-        max_pages = 1000
+        max_pages = 100
         page_count = 0
+        total_bytes = 0
 
         with requests.Session() as session:
             while next_url:
@@ -162,12 +161,10 @@ def extract_load_tool(
 
                 visited_urls.add(next_url)
 
-                response = session.get(
-                    next_url,
-                    timeout=30,
-                )
-                response.raise_for_status()
-                data = response.json()
+                data, response_url, response_size = request_json(session, next_url)
+                total_bytes += response_size
+                if total_bytes > 25 * 1024 * 1024:
+                    return "Extraction stopped: total response size exceeded 25 MiB."
                 page_count += 1
 
                 if isinstance(data, list):
@@ -177,7 +174,13 @@ def extract_load_tool(
                 elif isinstance(data, dict):
                     if isinstance(data.get("results"), list):
                         records.extend(data["results"])
-                        next_url = data.get("next")
+                        next_value = data.get("next")
+                        if next_value is None or next_value == "":
+                            next_url = None
+                        elif isinstance(next_value, str):
+                            next_url = validate_public_url(urljoin(response_url, next_value))
+                        else:
+                            return "Unsupported API response: next URL must be a string or null."
 
                     elif page_count == 1:
                         # A single object, not a paginated collection.
@@ -196,6 +199,9 @@ def extract_load_tool(
                         f"{type(data).__name__}"
                     )
 
+                if len(records) > 100_000:
+                    return "Extraction stopped: record limit of 100,000 exceeded."
+
         df = pd.json_normalize(records)
 
         output_file = (
@@ -212,8 +218,8 @@ def extract_load_tool(
             f"Columns: {', '.join(map(str, df.columns))}"
         )
 
-    except requests.exceptions.RequestException as exc:
-        return f"API request failed: {exc}"
+    except (requests.exceptions.RequestException, UnsafeInputError) as exc:
+        return f"API request rejected or failed: {exc}"
 
     except (ValueError, OSError, ImportError) as exc:
         return f"Extraction or saving failed: {exc}"
@@ -261,6 +267,9 @@ def transform_load_tool(
 
         if not input_path.is_file():
             return f"Input file not found: {input_path}"
+
+        if input_path.stat().st_size > MAX_INPUT_FILE_BYTES:
+            return "Input file exceeds the 50 MiB limit."
 
         if not output_dir.is_dir() and output_dir.exists():
             return f"Output path is not a directory: {output_dir}"

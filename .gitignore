@@ -31,3 +31,4 @@ frontend/dist/
 /.phase*-local-review.sqlite3
 /.phase*-pytest-tmp/
 /ola_agentic_ai_project.egg-info/
+/test_schema_details.txt

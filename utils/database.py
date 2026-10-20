@@ -1,10 +1,7 @@
 
 import os
+from pathlib import Path
 import psycopg2
-from psycopg2 import sql
-from dotenv import load_dotenv
-
-load_dotenv()
 
 
 class DatabaseUtil:
@@ -59,49 +56,11 @@ class DatabaseUtil:
                         f"Data Type: {data_type}\n"
                     )
 
-                # Safely quote schema and table identifiers.
-                query = sql.SQL("SELECT * FROM {}.{} LIMIT 5").format(
-                    sql.Identifier(schema_name),
-                    sql.Identifier(table_name)
-                )
-                cursor.execute(query)
-                sample_data = cursor.fetchall()
-
-                context += "  Sample Data:\n"
-                for row in sample_data:
-                    context += f"    {row}\n"
-
             return context
 
         except psycopg2.Error as e:
             self.connection.rollback()
             return f"Error fetching schema details: {e}"
-
-        finally:
-            if cursor is not None:
-                cursor.close()
-
-    def execute_sql(self, query):
-        if self.connection is None:
-            return "Error: No database connection."
-
-        cursor = None
-
-        try:
-            cursor = self.connection.cursor()
-            cursor.execute(query)
-
-            if cursor.description is not None:
-                result = cursor.fetchall()
-            else:
-                result = f"{cursor.rowcount} row(s) affected"
-
-            self.connection.commit()
-            return str(result)
-
-        except psycopg2.Error as e:
-            self.connection.rollback()
-            return f"Error executing query: {e}"
 
         finally:
             if cursor is not None:
@@ -114,6 +73,9 @@ class DatabaseUtil:
 
 
 if __name__ == "__main__":
+    from dotenv import load_dotenv
+
+    load_dotenv(Path(__file__).resolve().parents[1] / ".env")
     config = {
         "host": os.getenv("host", "localhost"),
         "port": int(os.getenv("port", "5432")),
@@ -129,11 +91,17 @@ if __name__ == "__main__":
 
     try:
         result = obj.schema_details("public")
-        with open("test_schema_details.txt", "w", encoding="utf-8") as f:
+        output_path = (
+            Path(__file__).resolve().parents[1]
+            / "app_data"
+            / "schema_details.txt"
+        )
+        output_path.parent.mkdir(parents=True, exist_ok=True)
+        with output_path.open("w", encoding="utf-8") as f:
             f.write(result)
 
         print(result)
-        print("\nSchema details saved to test_schema_details.txt")
+        print(f"\nSchema details saved to {output_path}")
 
     finally:
         obj.close()
