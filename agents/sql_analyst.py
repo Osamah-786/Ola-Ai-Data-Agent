@@ -2,6 +2,8 @@
 import os
 import sys
 import re
+import json
+from pathlib import Path
 
 from dotenv import load_dotenv
 from psycopg2 import connect, sql as pg_sql
@@ -334,8 +336,10 @@ def execute_sql(state: AgentSchema) -> AgentSchema:
         if len(rows) > 100:
             rows = rows[:100]
 
-        state.sql_query_execution_result = str(
-            [dict(row) for row in rows]
+        # JSON keeps values such as dates and Decimal instances transportable
+        # through the API; unknown scalar types fall back to safe text values.
+        state.sql_query_execution_result = json.dumps(
+            [dict(row) for row in rows], default=str
         )
 
         connection.rollback()
@@ -532,10 +536,12 @@ if __name__ == "__main__":
         try:
             graph_image = sql_analyst.get_graph().draw_mermaid_png()
 
-            with open("sql_analyst_graph.png", "wb") as file:
+            graph_path = Path(__file__).resolve().parents[1] / "docs" / "diagrams" / "sql_analyst_graph.png"
+            graph_path.parent.mkdir(parents=True, exist_ok=True)
+            with graph_path.open("wb") as file:
                 file.write(graph_image)
 
-            print("\nGraph saved to sql_analyst_graph.png")
+            print(f"\nGraph saved to {graph_path}")
 
         except Exception as exc:
             print(f"\nGraph image was not generated: {exc}")

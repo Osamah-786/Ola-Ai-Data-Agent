@@ -2,7 +2,6 @@
 import os
 import sys
 import json
-import re
 from pathlib import Path
 
 import pandas as pd
@@ -26,6 +25,7 @@ sys.path.insert(0, str(PROJECT_ROOT))
 load_dotenv(PROJECT_ROOT / ".env")
 
 from models.schema import ETLAgentSchema
+from app.services.etl_transform import TransformationPlanError, apply_plan, parse_plan
 
 
 # ============================================================
@@ -329,197 +329,8 @@ User request:
 {user_question}
 """
 
-        response = llm.invoke(prompt).content
-
-        if isinstance(response, list):
-            response = "".join(
-                item.get("text", "")
-                for item in response
-                if isinstance(item, dict)
-            )
-
-        response = str(response).strip()
-
-        # Allow JSON enclosed in Markdown fences.
-        response = re.sub(
-            r"^```(?:json)?\s*",
-            "",
-            response,
-            flags=re.IGNORECASE,
-        )
-        response = re.sub(r"\s*```$", "", response).strip()
-
-        plan = json.loads(response)
-
-        if not isinstance(plan, dict):
-            return "Invalid transformation plan: expected a JSON object."
-
-        operations = plan.get("operations")
-
-        if not isinstance(operations, list):
-            return "Invalid transformation plan: operations must be a list."
-
-        if len(operations) > 30:
-            return "Transformation rejected: too many operations."
-
-        applied_operations = []
-
-        for operation in operations:
-            if not isinstance(operation, dict):
-                return "Invalid transformation operation."
-
-            operation_type = operation.get("type")
-
-            if operation_type == "select_columns":
-                selected = operation.get("columns")
-
-                if not isinstance(selected, list) or not selected:
-                    return "select_columns requires a non-empty columns list."
-
-                missing = [c for c in selected if c not in df.columns]
-                if missing:
-                    return f"Unknown columns: {missing}"
-
-                df = df[selected]
-                applied_operations.append(operation_type)
-
-            elif operation_type == "drop_columns":
-                selected = operation.get("columns")
-
-                if not isinstance(selected, list):
-                    return "drop_columns requires a columns list."
-
-                missing = [c for c in selected if c not in df.columns]
-                if missing:
-                    return f"Unknown columns: {missing}"
-
-                df = df.drop(columns=selected)
-                applied_operations.append(operation_type)
-
-            elif operation_type == "rename_columns":
-                mapping = operation.get("mapping")
-
-                if not isinstance(mapping, dict):
-                    return "rename_columns requires a mapping object."
-
-                missing = [c for c in mapping if c not in df.columns]
-                if missing:
-                    return f"Unknown columns to rename: {missing}"
-
-                new_names = list(mapping.values())
-
-                if len(new_names) != len(set(new_names)):
-                    return "Rename rejected: duplicate destination column names."
-
-                unaffected = [
-                    c for c in df.columns if c not in mapping
-                ]
-
-                if set(new_names) & set(unaffected):
-                    return (
-                        "Rename rejected: a destination column name "
-                        "already exists."
-                    )
-
-                df = df.rename(columns=mapping)
-                applied_operations.append(operation_type)
-
-            elif operation_type == "drop_duplicates":
-                selected = operation.get("columns")
-
-                if selected is not None:
-                    if not isinstance(selected, list):
-                        return "drop_duplicates columns must be a list."
-
-                    missing = [
-                        c for c in selected if c not in df.columns
-                    ]
-                    if missing:
-                        return f"Unknown columns: {missing}"
-
-                df = df.drop_duplicates(subset=selected)
-                applied_operations.append(operation_type)
-
-            elif operation_type == "sort_values":
-                column = operation.get("column")
-
-                if column not in df.columns:
-                    return f"Unknown sort column: {column}"
-
-                ascending = operation.get("ascending", True)
-
-                if not isinstance(ascending, bool):
-                    return "ascending must be true or false."
-
-                df = df.sort_values(
-                    by=column,
-                    ascending=ascending,
-                )
-                applied_operations.append(operation_type)
-
-            elif operation_type == "filter_rows":
-                column = operation.get("column")
-                operator = operation.get("operator")
-                value = operation.get("value")
-
-                if column not in df.columns:
-                    return f"Unknown filter column: {column}"
-
-                if operator not in {"==", "!=", ">", ">=", "<", "<=", "contains"}:
-                    return f"Unsupported filter operator: {operator}"
-
-                series = df[column]
-
-                if operator == "contains":
-                    mask = series.astype("string").str.contains(
-                        str(value),
-                        case=False,
-                        na=False,
-                        regex=False,
-                    )
-                elif operator == "==":
-                    mask = series == value
-                elif operator == "!=":
-                    mask = series != value
-                else:
-                    numeric_series = pd.to_numeric(
-                        series,
-                        errors="coerce",
-                    )
-
-                    try:
-                        numeric_value = float(value)
-                    except (TypeError, ValueError):
-                        return (
-                            f"Numeric comparison requires a number: {value}"
-                        )
-
-                    if operator == ">":
-                        mask = numeric_series > numeric_value
-                    elif operator == ">=":
-                        mask = numeric_series >= numeric_value
-                    elif operator == "<":
-                        mask = numeric_series < numeric_value
-                    else:
-                        mask = numeric_series <= numeric_value
-
-                df = df.loc[mask].copy()
-                applied_operations.append(operation_type)
-
-            elif operation_type == "fillna":
-                column = operation.get("column")
-
-                if column not in df.columns:
-                    return f"Unknown fillna column: {column}"
-
-                if "value" not in operation:
-                    return "fillna requires a value."
-
-                df[column] = df[column].fillna(operation["value"])
-                applied_operations.append(operation_type)
-
-            else:
-                return f"Unsupported transformation: {operation_type}"
+        plan = parse_plan(llm.invoke(prompt))
+        df, applied_operations = apply_plan(df, plan)
 
         output_dir.mkdir(parents=True, exist_ok=True)
 
@@ -545,8 +356,8 @@ User request:
             f"Applied operations: {applied_operations or 'None'}"
         )
 
-    except json.JSONDecodeError as exc:
-        return f"Could not parse the LLM transformation plan: {exc}"
+    except (json.JSONDecodeError, TransformationPlanError) as exc:
+        return f"Could not apply the LLM transformation plan: {exc}"
 
     except (OSError, ValueError, ImportError) as exc:
         return f"Transformation failed: {exc}"

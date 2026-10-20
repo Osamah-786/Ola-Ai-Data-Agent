@@ -263,7 +263,8 @@ def save_graph():
     try:
         graph_image = data_agent.get_graph().draw_mermaid_png()
 
-        output_path = PROJECT_ROOT / "data_agent_graph.png"
+        output_path = PROJECT_ROOT / "docs" / "diagrams" / "data_agent_graph.png"
+        output_path.parent.mkdir(parents=True, exist_ok=True)
         output_path.write_bytes(graph_image)
 
         print(f"Graph saved to: {output_path}")

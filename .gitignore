@@ -11,3 +11,23 @@ venv/
 
 # Local data
 data/
+app_data/
+
+# Logs and test artifacts
+*.log
+.pytest_cache/
+.coverage
+htmlcov/
+test-results/
+playwright-report/
+node_modules/
+frontend/dist/
+.vite/
+
+# Generated local datasets, review databases, test artifacts, and build metadata
+/extracted_data/
+/transformed_data/
+/transformed_data_*/
+/.phase*-local-review.sqlite3
+/.phase*-pytest-tmp/
+/ola_agentic_ai_project.egg-info/

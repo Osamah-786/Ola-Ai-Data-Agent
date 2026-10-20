@@ -1,5 +1,6 @@
 import os
 import csv
+from pathlib import Path
 import psycopg2
 from psycopg2 import sql
 from dotenv import load_dotenv
@@ -20,7 +21,8 @@ DB_CONFIG = {
     "password": os.environ['password'],
 }
 
-CSV_DIR = "data"
+PROJECT_ROOT = Path(__file__).resolve().parents[2]
+CSV_DIR = PROJECT_ROOT / "data"
 
 
 # ============================================================
@@ -242,7 +244,7 @@ cursor.execute("""
 
 def load_csv(table_name, csv_file, columns):
 
-    file_path = os.path.join(CSV_DIR, csv_file)
+    file_path = CSV_DIR / csv_file
 
     if not os.path.exists(file_path):
         raise FileNotFoundError(
