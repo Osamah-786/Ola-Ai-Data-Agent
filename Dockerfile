@@ -13,8 +13,9 @@ COPY models ./models
 COPY utils ./utils
 
 RUN python -m venv /opt/venv \
-    && /opt/venv/bin/pip install --upgrade pip \
-    && /opt/venv/bin/pip install . uvicorn[standard]
+    && /opt/venv/bin/pip install --upgrade pip setuptools \
+    && /opt/venv/bin/pip install . uvicorn[standard] \
+    && /opt/venv/bin/pip check
 
 FROM python:3.13-slim AS runtime
 

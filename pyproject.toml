@@ -1,5 +1,5 @@
 [build-system]
-requires = ["setuptools>=64"]
+requires = ["setuptools>=78.1.1"]
 build-backend = "setuptools.build_meta"
 
 [project]
@@ -21,6 +21,8 @@ dependencies = [
     "groq",
     "psycopg2-binary",
     "pyarrow",
+    "msgpack>=1.2.1",
+    "urllib3>=2.8.0",
 ]
 
 [dependency-groups]
