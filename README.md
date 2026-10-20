@@ -129,7 +129,7 @@ The previously tracked `test_schema_details.txt` database sample dump has been r
 ## Current verification status
 
 This project is still in development. Some mocked backend checks and frontend builds are documented in `BUILD_PLAN.md`; live LangGraph/Groq execution, external-provider behavior, database permission verification, and complete browser coverage remain unverified. Read the phase status and blockers in `BUILD_PLAN.md` and the security findings in `CLEANUP_AUDIT.md` before relying on the application.
-=======
+
 # Ola AI Data Agent
 
 Ola AI Data Agent is a local learning project for exploring API datasets and asking questions about PostgreSQL data. It includes a FastAPI backend, a React + TypeScript frontend, and existing LangGraph workflows for ETL and SQL analysis.
