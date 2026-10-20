@@ -18,33 +18,57 @@ pipeline {
     stages {
         stage('Backend tests') {
             steps {
-                sh 'python3.13 -m pytest -q'
+                sh '''
+                    docker run --rm \
+                        --user "$(id -u):$(id -g)" \
+                        --env HOME=/tmp \
+                        --mount type=bind,source="$WORKSPACE",target=/workspace \
+                        --workdir /workspace \
+                        python:3.13-slim \
+                        sh -eu -c '
+                            python -m venv /tmp/venv
+                            /tmp/venv/bin/python -m pip install --no-cache-dir --disable-pip-version-check . pytest httpx
+                            /tmp/venv/bin/python -m pytest -q
+                        '
+                '''
             }
         }
 
         stage('Frontend tests and build') {
             steps {
-                dir('frontend') {
-                    sh 'npm ci'
-                    sh 'npm test -- --run'
-                    sh 'npm run build'
-                }
+                sh '''
+                    docker run --rm \
+                        --user "$(id -u):$(id -g)" \
+                        --env HOME=/tmp \
+                        --env npm_config_cache=/tmp/npm-cache \
+                        --mount type=bind,source="$WORKSPACE",target=/workspace \
+                        --workdir /workspace/frontend \
+                        node:24-bookworm-slim \
+                        sh -eu -c '
+                            npm ci
+                            npm test -- --run
+                            npm run build
+                        '
+                '''
             }
         }
 
         stage('SonarQube analysis') {
-            when {
-                expression { return env.SONAR_HOST_URL?.trim() }
-            }
             steps {
-                withSonarQubeEnv('sonarqube') {
-                    sh '''
-                        if command -v sonar-scanner >/dev/null 2>&1; then
-                            sonar-scanner
-                        else
-                            echo "sonar-scanner is unavailable; skipping analysis"
-                        fi
-                    '''
+                script {
+                    if (!env.SONAR_HOST_URL?.trim()) {
+                        echo 'SonarQube analysis skipped: SONAR_HOST_URL is not configured.'
+                    } else {
+                        withSonarQubeEnv('sonarqube') {
+                            sh '''
+                                if command -v sonar-scanner >/dev/null 2>&1; then
+                                    sonar-scanner
+                                else
+                                    echo 'SonarQube analysis skipped: sonar-scanner is unavailable on the Jenkins agent.'
+                                fi
+                            '''
+                        }
+                    }
                 }
             }
         }
@@ -63,7 +87,7 @@ pipeline {
                         trivy image --exit-code 1 --severity HIGH,CRITICAL --ignore-unfixed "$BACKEND_IMAGE"
                         trivy image --exit-code 1 --severity HIGH,CRITICAL --ignore-unfixed "$FRONTEND_IMAGE"
                     else
-                        echo "trivy is unavailable; skipping image scan"
+                        echo 'Trivy image scanning skipped: trivy is unavailable on the Jenkins agent.'
                     fi
                 '''
             }
