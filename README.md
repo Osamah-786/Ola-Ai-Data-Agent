@@ -114,7 +114,7 @@ The SQL agent is intended to use read-only SQL checks and a read-only transactio
 
 ### Destructive database loader
 
-`scripts/database/feed_db.py` loads the sample rideshare CSV files from `data/`. It contains `TRUNCATE ... CASCADE` operations and connects to PostgreSQL as part of its execution. It can delete existing data in its target tables. **Do not run it against a database with data you need to keep.** Use only a disposable database after reviewing the script and its configuration. It is intentionally not part of the normal setup steps.
+`scripts/database/feed_db.py` loads the sample rideshare CSV files from `data/`. It contains `TRUNCATE ... CASCADE` operations and can delete existing data in its target tables. Importing the module does not connect; direct execution refuses to proceed unless `--confirm-truncate` is supplied. **Only use that flag with a disposable database after reviewing the script and configuration.** It is intentionally not part of normal setup.
 
 ### Local transform example
 
@@ -124,7 +124,7 @@ From the repository root, `python scripts/examples/transform_pokemon.py` reads `
 
 Local input datasets belong under `data/`. The web application stores managed outputs, metadata, and its SQLite run-history database under `app_data/`. These paths and local environments/build outputs are Git-ignored. Do not put credentials, customer data, or sensitive database samples in tracked files.
 
-The tracked `test_schema_details.txt` is a generated schema-inspection artifact and may contain database sample rows. It has not been reviewed as part of the repository cleanup. Treat it as potentially sensitive and inspect/sanitize it before sharing the repository.
+The previously tracked `test_schema_details.txt` database sample dump has been removed from the working tree and added to `.gitignore`; this does not remove historical Git revisions. `utils/database.py` now returns schema metadata without sample rows and writes its local inspection output under ignored `app_data/schema_details.txt`.
 
 ## Current verification status
 

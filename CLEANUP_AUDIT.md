@@ -6,13 +6,13 @@ Initial read-only audit of the working tree and requested documentation. The sub
 
 | Classification | Finding and reason | Affected paths |
 |---|---|---|
-| **Security Fix** | `execute_code()` calls Python `exec()` with normal builtins. Its docstring warns against untrusted/model-generated code, but there is no sandbox and no in-repository call site. Remove the helper or make a separately isolated, explicit trusted-code feature before exposing it. | `utils/etl_tools.py:220` |
-| **Security Fix** | `DatabaseUtil.execute_sql()` accepts arbitrary SQL and commits it; current repository references use schema inspection, not this method. Remove it or enforce a read-only transaction and narrowly defined query interface. | `utils/database.py:84` |
-| **Security Fix** | The legacy CLI ETL accepts caller/model-supplied absolute paths and does not use the web service's public-URL/redirect checks. This is separate from the web ETL, which has managed-root containment and bounded URL fetching. Restrict legacy inputs/outputs or clearly disable that entry point for untrusted callers. | `agents/etl_analyst.py:56,113,233`; `utils/etl_tools.py:23,126` |
+| **Security Fix — addressed in Phase 7 Step 1** | Removed `ETLTools.execute_code()`; model-generated Python cannot be passed to this helper because it no longer exists. | `utils/etl_tools.py` |
+| **Security Fix — addressed in Phase 7 Step 1** | Removed `DatabaseUtil.execute_sql()`. The utility now exposes metadata inspection only, without sample rows. | `utils/database.py`; `agents/sql_analyst.py` |
+| **Security Fix — mitigated in Phase 7 Step 1** | Legacy ETL now validates public HTTP(S) destinations and each redirect, applies response/page/record and file-size caps, and confines filesystem access to `data/`. DNS validation and the HTTP client's subsequent name resolution are separate operations, so a DNS-rebinding race remains a residual risk; keep network egress controls in place. | `agents/etl_analyst.py`; `utils/etl_tools.py`; `utils/safe_http.py` |
 | **Security Fix** | The SQL validator is lexical/regex-based, not a SQL parser. The workflow adds a read-only transaction, but database-side least-privilege permissions have not been verified. Do not treat the validator or LLM review as authorization; verify a dedicated read-only role and consider parser-based validation before real data use. | `agents/sql_analyst.py:69,291`; `utils/database.py`; `README.md` |
-| **Security Fix** | `scripts/database/feed_db.py` connects during module import and executes `TRUNCATE ... CASCADE` on five tables before loading. The README warns about this, but the script has no opt-in destructive-operation guard. Keep it out of routine setup and require an explicit disposable-database guard before anyone runs it. | `scripts/database/feed_db.py:1,228` |
+| **Security Fix — addressed for accidental execution in Phase 7 Step 1** | Loader work now runs only under `main()` and direct execution requires `--confirm-truncate` before loading environment configuration or connecting. The operation remains deliberately destructive when authorized; use only a disposable database. | `scripts/database/feed_db.py` |
 | **Security Fix** | The app has no authentication or owner isolation. ETL datasets and run history are shared among API callers. This is documented and acceptable only for the local single-user scope; add identity-based authorization before multi-user or hosted exposure. | `app/main.py`; `app/api/runs.py`; `app/api/etl.py`; `app/core/run_history.py`; `README.md`; `PROJECT_CONTEXT.md` |
-| **Security Fix** | `test_schema_details.txt` is a tracked generated schema-inspection dump; the generator includes sample database rows. Review/sanitize it without publishing any real data. Local `.env` and `frontend/.env.local` files are ignored and were not opened; ensure browser-exposed `VITE_*` variables contain no credentials. | `test_schema_details.txt`; `utils/database.py:48-68,132`; `.gitignore`; `frontend/.env.local` |
+| **Security Fix — removed from working tree in Phase 7 Step 1** | Deleted the tracked schema sample dump and added an ignore rule to prevent regeneration at that path. Existing Git history is unchanged and may retain prior versions; treat old revisions as sensitive. The schema utility now outputs metadata only to ignored `app_data/schema_details.txt`. `.env` and `frontend/.env.local` contents were not opened; ensure browser-exposed `VITE_*` variables contain no credentials. | `test_schema_details.txt`; `utils/database.py`; `.gitignore`; `frontend/.env.local` |
 | **Remove Candidate** | Experimental scratch module invokes an LLM at import time and has no source call sites. Remove it or convert it to an explicitly guarded test/demo before packaging. | `agents/scratch.py` |
 | **Remove Candidate** | Empty root `main.py` duplicates the name of the actual FastAPI entry point and has no content or references. | `main.py`; `app/main.py` |
 | **Keep** | Standalone Pokémon transform script remains a documented example under scripts. It performs file operations at import, so execute it only as a CLI; a main guard can be considered separately. | `scripts/examples/transform_pokemon.py`; `agents/etl_analyst.py`; `app/services/etl_transform.py` |
@@ -39,13 +39,13 @@ Initial read-only audit of the working tree and requested documentation. The sub
 
 1. Add authentication and per-user authorization for runs, datasets, and every state-changing or data-bearing endpoint.
 2. Remove or isolate arbitrary `exec`, arbitrary committed SQL utilities, and legacy ETL path/URL access; add regression tests around the boundaries.
-3. Make `feed_db.py` non-destructive by default and require explicit confirmation/guarding for any truncate-and-load workflow; remove or sanitize the tracked sample-data dump.
+3. Replace destructive loading with a non-destructive default and review historical Git revisions for sensitive schema samples; current direct loader execution requires an explicit confirmation flag, and the working-tree dump is removed.
 4. Verify and enforce a least-privilege PostgreSQL role, strengthen SQL validation beyond regex, and keep read-only transaction/timeouts as defense in depth.
 5. Establish CI with Python 3.13 install/build plus complete mocked backend tests, frontend interaction tests, and browser route/error/success coverage; resolve the HTTP test-helper stall first.
 
 ## Audit limits
 
-This is static inspection, not a penetration test, dependency vulnerability scan, secrets scan, or production database review. `scripts/database/feed_db.py`, agent graph exporters, LLM clients, external URLs, and PostgreSQL were not executed. `.env` files were not read. No package installation or destructive cleanup was performed.
+This is static inspection, not a penetration test, dependency vulnerability scan, secrets scan, or production database review. `scripts/database/feed_db.py`, agent graph exporters, LLM clients, external URLs, and PostgreSQL were not executed. `.env` files were not read. No package installation or database-destructive operation was performed. The tracked sample dump was intentionally deleted as requested.
 
 ## Repository structure cleanup record — 2026-10-20
 
@@ -62,3 +62,12 @@ This is static inspection, not a penetration test, dependency vulnerability scan
 - Tests and `npm run build` were not run: this cleanup was limited to paths/docs and no dependencies were installed; a production build is not material to path-only changes. No external API, LLM, agent, PostgreSQL, or `feed_db.py` operation occurred.
 - `test_schema_details.txt` remains tracked at its original location and was not read or moved because the audit identifies it as a generated schema dump containing sample rows. Treat it as potentially sensitive and review/sanitize it before sharing. The loader still has import-time database side effects and destructive truncate behavior.
 - The existing working tree contains many pre-existing user changes and untracked project files; all were preserved. No staging or cleanup deletion was performed. `CLEANUP_AUDIT.md` itself remains a user-created untracked document in the current repository state.
+
+### Phase 7 Step 1 security remediation — 2026-10-20
+
+- Removed `test_schema_details.txt` from the working tree and added it to `.gitignore`; no history rewrite or staging was done. Git reports the deletion in the working tree until it is included in a user-approved commit.
+- Removed sample-row retrieval from `DatabaseUtil.schema_details()`, removed its arbitrary committing `execute_sql()` method, and changed the CLI report path to ignored `app_data/schema_details.txt`.
+- Removed `ETLTools.execute_code()`. Added shared legacy ETL URL validation for public HTTP(S) addresses, manually checked redirects, response bounds, and resolved `data/`-root path containment. The active legacy agent now uses these controls and caps pages, bytes, records, and file size.
+- Moved loader actions under `main()` and made `--confirm-truncate` mandatory before `.env` loading or any database connection. The explicit operation remains destructive.
+- Mocked security and existing ETL/SQL API tests: **51 passed**. Python compile checks and `git diff --check` passed. No live agent, external API, or database operation was made.
+- Residual risk: DNS is validated before the HTTP client performs its own resolution; network egress restrictions are still needed to fully address DNS rebinding. Historical Git revisions may retain the removed schema dump.
