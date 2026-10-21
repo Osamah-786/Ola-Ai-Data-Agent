@@ -75,7 +75,7 @@ pipeline {
 
         stage('Build Docker images') {
             steps {
-                sh 'docker build --file Dockerfile --tag "$BACKEND_IMAGE" .'
+                sh 'docker build --pull --no-cache --file Dockerfile --tag "$BACKEND_IMAGE" .'
                 sh 'docker build --file frontend/Dockerfile --tag "$FRONTEND_IMAGE" frontend'
             }
         }

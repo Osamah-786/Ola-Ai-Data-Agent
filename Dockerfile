@@ -12,9 +12,11 @@ COPY agents ./agents
 COPY models ./models
 COPY utils ./utils
 
+# Keep dependency installation tied to the declared dependency metadata and refresh packages.
+ARG DEPENDENCY_INSTALL_REVISION=2
 RUN python -m venv /opt/venv \
     && /opt/venv/bin/pip install --upgrade pip setuptools \
-    && /opt/venv/bin/pip install . uvicorn[standard] \
+    && /opt/venv/bin/pip install --no-cache-dir --upgrade --force-reinstall . uvicorn[standard] \
     && /opt/venv/bin/pip check
 
 FROM python:3.13-slim AS runtime
