@@ -75,8 +75,25 @@ pipeline {
 
         stage('Build Docker images') {
             steps {
-                sh 'docker build --pull --no-cache --file Dockerfile --tag "$BACKEND_IMAGE" .'
+                sh 'docker build --pull --no-cache --build-arg DEPENDENCY_INSTALL_REVISION="$BUILD_NUMBER" --file Dockerfile --tag "$BACKEND_IMAGE" .'
                 sh 'docker build --file frontend/Dockerfile --tag "$FRONTEND_IMAGE" frontend'
+                sh '''
+                    docker run --rm --entrypoint python "$BACKEND_IMAGE" -c '
+                        import importlib.metadata as metadata
+                        from packaging.version import Version
+                        required = {
+                            "msgpack": "1.2.1",
+                            "setuptools": "78.1.1",
+                            "urllib3": "2.8.0",
+                        }
+                        for package, minimum in required.items():
+                            installed = metadata.version(package)
+                            if Version(installed) < Version(minimum):
+                                raise SystemExit(f"{package} {installed} is below required {minimum}")
+                            print(f"{package} {installed}")
+                    '
+                    docker run --rm --entrypoint python "$BACKEND_IMAGE" -m pip check
+                '''
             }
         }
 
