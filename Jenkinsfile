@@ -79,7 +79,45 @@ pipeline {
                 sh 'docker build --file frontend/Dockerfile --tag "$FRONTEND_IMAGE" frontend'
                 sh '''
                     docker run --rm --entrypoint python "$BACKEND_IMAGE" -c 'import importlib.metadata as m; from packaging.version import Version; r={"msgpack":"1.2.1","setuptools":"78.1.1","urllib3":"2.8.0"}; [(print(f"{p} {v}") or (_ for _ in ()).throw(SystemExit(f"{p} {v} is below required {n}"))) if Version((v:=m.version(p))) < Version(n) else print(f"{p} {v}") for p,n in r.items()]'
-                    docker run --rm --entrypoint python "$BACKEND_IMAGE" -m pip check
+                    docker run --rm --entrypoint sh "$BACKEND_IMAGE" -eu -c '
+                        check_absent() {
+                            for path in "$@"; do
+                                if [ -e "$path" ]; then
+                                    echo "Unexpected runtime package path: $path" >&2
+                                    exit 1
+                                fi
+                            done
+                        }
+
+                        check_present() {
+                            for path in "$@"; do
+                                if [ ! -e "$path" ]; then
+                                    echo "Missing patched runtime package path: $path" >&2
+                                    exit 1
+                                fi
+                            done
+                        }
+
+                        check_absent \
+                            /opt/venv/bin/pip \
+                            /opt/venv/bin/pip3 \
+                            /opt/venv/bin/pip3.13 \
+                            /opt/venv/lib/python3.13/site-packages/pip \
+                            /opt/venv/lib/python3.13/site-packages/pip-*.dist-info \
+                            /usr/local/bin/pip \
+                            /usr/local/bin/pip3 \
+                            /usr/local/bin/pip3.13 \
+                            /usr/local/lib/python3.13/site-packages/pip \
+                            /usr/local/lib/python3.13/site-packages/pip-*.dist-info \
+                            /usr/local/lib/python3.13/site-packages/setuptools \
+                            /usr/local/lib/python3.13/site-packages/setuptools-*.dist-info
+
+                        check_present \
+                            /opt/venv/lib/python3.13/site-packages/setuptools \
+                            /opt/venv/lib/python3.13/site-packages/setuptools-*.dist-info
+
+                        echo "Runtime package cleanup validation passed."
+                    '
                 '''
             }
         }
