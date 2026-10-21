@@ -13,6 +13,10 @@ pipeline {
         COMPOSE_DOCKER_CLI_BUILD = '1'
         BACKEND_IMAGE = "ola-ai-data-agent-backend:${env.BUILD_NUMBER}"
         FRONTEND_IMAGE = "ola-ai-data-agent-frontend:${env.BUILD_NUMBER}"
+        ECR_REGISTRY = '271825826985.dkr.ecr.ap-south-1.amazonaws.com'
+        AWS_REGION = 'ap-south-1'
+        BACKEND_ECR_IMAGE = "271825826985.dkr.ecr.ap-south-1.amazonaws.com/ola-ai-data-agent-backend:${env.BUILD_NUMBER}"
+        FRONTEND_ECR_IMAGE = "271825826985.dkr.ecr.ap-south-1.amazonaws.com/ola-ai-data-agent-frontend:${env.BUILD_NUMBER}"
     }
 
     stages {
@@ -129,8 +133,48 @@ pipeline {
                         trivy image --config="" --ignorefile="" --secret-config="" --exit-code 1 --severity HIGH,CRITICAL --ignore-unfixed "$BACKEND_IMAGE"
                         trivy image --config="" --ignorefile="" --secret-config="" --exit-code 1 --severity HIGH,CRITICAL --ignore-unfixed "$FRONTEND_IMAGE"
                     else
-                        echo 'Trivy image scanning skipped: trivy is unavailable on the Jenkins agent.'
+                        echo 'ERROR: Trivy is unavailable on the Jenkins agent; refusing to continue.' >&2
+                        exit 1
                     fi
+                '''
+            }
+        }
+
+        stage('Push images to ECR') {
+            steps {
+                sh '''
+                    set -eu
+                    docker_config=$(mktemp -d)
+                    trap 'rm -rf "$docker_config"' EXIT
+                    export DOCKER_CONFIG="$docker_config"
+
+                    aws ecr get-login-password --region "$AWS_REGION" | docker login --username AWS --password-stdin "$ECR_REGISTRY"
+                    docker tag "$BACKEND_IMAGE" "$BACKEND_ECR_IMAGE"
+                    docker tag "$FRONTEND_IMAGE" "$FRONTEND_ECR_IMAGE"
+                    docker push "$BACKEND_ECR_IMAGE"
+                    docker push "$FRONTEND_ECR_IMAGE"
+                '''
+            }
+        }
+
+        stage('Deploy to EC2') {
+            steps {
+                sh '''
+                    set -eu
+                    if ss -ltnH '( sport = :80 )' | grep -q .; then
+                        echo 'Deployment aborted: host port 80 is already occupied.' >&2
+                        ss -ltnp '( sport = :80 )' || true
+                        exit 1
+                    fi
+
+                    docker_config=$(mktemp -d)
+                    trap 'rm -rf "$docker_config"' EXIT
+                    export DOCKER_CONFIG="$docker_config"
+
+                    aws ecr get-login-password --region "$AWS_REGION" | docker login --username AWS --password-stdin "$ECR_REGISTRY"
+                    export IMAGE_TAG="$BUILD_NUMBER"
+                    docker compose -f docker-compose.deploy.yml pull backend frontend
+                    docker compose -f docker-compose.deploy.yml up -d --remove-orphans --wait --wait-timeout 120
                 '''
             }
         }
@@ -138,7 +182,7 @@ pipeline {
 
     post {
         always {
-            sh 'docker image rm "$BACKEND_IMAGE" "$FRONTEND_IMAGE" 2>/dev/null || true'
+            sh 'docker image rm "$BACKEND_IMAGE" "$FRONTEND_IMAGE" "$BACKEND_ECR_IMAGE" "$FRONTEND_ECR_IMAGE" 2>/dev/null || true'
             cleanWs()
         }
     }
