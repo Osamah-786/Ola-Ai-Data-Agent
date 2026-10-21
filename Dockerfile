@@ -17,9 +17,26 @@ ARG DEPENDENCY_INSTALL_REVISION=2
 RUN python -m venv /opt/venv \
     && /opt/venv/bin/pip install --upgrade pip setuptools \
     && /opt/venv/bin/pip install --no-cache-dir --upgrade --force-reinstall . uvicorn[standard] \
-    && /opt/venv/bin/pip check
+    && /opt/venv/bin/pip check \
+    && rm -rf \
+        /opt/venv/bin/pip \
+        /opt/venv/bin/pip3 \
+        /opt/venv/bin/pip3.13 \
+        /opt/venv/lib/python3.13/site-packages/pip \
+        /opt/venv/lib/python3.13/site-packages/pip-*.dist-info
 
 FROM python:3.13-slim AS runtime
+
+# The runtime uses /opt/venv; remove the base image's global pip and its vendored packages.
+# This prevents stale vendored msgpack/urllib3 metadata from being included in the final image.
+RUN rm -rf \
+    /usr/local/bin/pip \
+    /usr/local/bin/pip3 \
+    /usr/local/bin/pip3.13 \
+    /usr/local/lib/python3.13/site-packages/pip \
+    /usr/local/lib/python3.13/site-packages/pip-*.dist-info \
+    /usr/local/lib/python3.13/site-packages/setuptools \
+    /usr/local/lib/python3.13/site-packages/setuptools-*.dist-info
 
 ENV PATH="/opt/venv/bin:$PATH" \
     PYTHONDONTWRITEBYTECODE=1 \
